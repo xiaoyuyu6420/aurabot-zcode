@@ -41,6 +41,14 @@ ${rulesText('social', cfg)}
   return dir
 }
 
+/** 后台写作会话适配器：qzone-social 的 write() 走上游 hub.runSystemTurn 契约；桥内用 zcode CLI 临时会话。 */
+function biliThinkAdapter(zcode) {
+  return async (name, title, prompt, { timeoutMs = 120000 } = {}) => {
+    const r = await zcode.runOnceIn(dataRoot(), prompt, { timeoutMs })
+    return r.text
+  }
+}
+
 export async function createApp({ echo = false, watch = false } = {}) {
   const logger = createLogger({ echo })
   const log = logger.child('core')
@@ -212,12 +220,14 @@ export async function createApp({ echo = false, watch = false } = {}) {
     },
   })
 
-  // ---------- M3/M4 模块实例 ----------
+  // ---------- M3/M4/M5 模块实例 ----------
   const dshBridge = createDshBridge()
   let stickersModuleRef = null
   let moodModuleRef = null
   let memoryModuleRef = null
   let speakupModuleRef = null
+  let biliModuleRef = null
+  let qzoneSocialModuleRef = null
   {
     const slog = logger.child('stickers')
     const { createStickerStore } = await import('./features/stickers.js')
@@ -254,6 +264,18 @@ export async function createApp({ echo = false, watch = false } = {}) {
     const { createSpeakUp } = await import('./features/companion.js')
     speakupModuleRef = createSpeakUp({ getConfig, hub, log: logger.child('speakup'), isMuted: () => false })
     log.info('主动搭话模块已加载')
+  }
+  {
+    // M5：B 站（看视频 / 定时刷 / 评论 / 分享）。后台思考走 zcode CLI 临时会话。
+    const { createBiliModule } = await import('./bili/index.js')
+    biliModuleRef = createBiliModule({ getConfig, hub, memory: memoryModuleRef, log: logger.child('bili'), zcode })
+    log.info('B 站模块已加载')
+  }
+  {
+    // M5：QQ 空间互动（回评论 / 逛好友动态）。后台评论走 zcode CLI 临时会话。
+    const { createQzoneSocial } = await import('./features/qzone-social.js')
+    qzoneSocialModuleRef = createQzoneSocial({ getConfig, onebot, hub: { ...hub, runSystemTurn: biliThinkAdapter(zcode) }, log: logger.child('qzone'), memory: memoryModuleRef })
+    log.info('空间互动模块已加载')
   }
 
   // ---------- 启动 / 看门狗 ----------
@@ -293,6 +315,17 @@ export async function createApp({ echo = false, watch = false } = {}) {
         log.debug('主动搭话评估失败：', error.message)
       }
     }
+    // M5：B 站 + 空间互动的定时评估（内部按 intervalHours / intervalMin 自己限频）
+    if (app.biliModule?.tick) {
+      try { await app.biliModule.tick() } catch (error) {
+        log.debug('刷 B 站出错：', error.message)
+      }
+    }
+    if (app.qzoneSocialModule?.tick) {
+      try { await app.qzoneSocialModule.tick() } catch (error) {
+        log.debug('逛空间出错：', error.message)
+      }
+    }
   }
   const safe = (fn, label) => () => { Promise.resolve().then(fn).catch((error) => log.warn(`${label}出错：`, error.message)) }
   const watchdogNow = safe(watchdog, '看门狗')
@@ -323,8 +356,8 @@ export async function createApp({ echo = false, watch = false } = {}) {
 
   const app = {
     logger, log, getConfig, setConfig,
-    // M3/M4 模块实例（面板与 webpanel 用）
-    stickersModule: null, moodModule: null, memoryModule: null, speakupModule: null,
+    // M3/M4/M5 模块实例（面板与 webpanel 用）
+    stickersModule: null, moodModule: null, memoryModule: null, speakupModule: null, biliModule: null, qzoneSocialModule: null,
     /** 只改内存里的配置（不落盘）：sim 这类本地测试用它临时放行，不碰真实的总开关。 */
     patchConfigLive(patch) {
       cfg = { ...cfg, ...patch(cfg) }
@@ -355,6 +388,8 @@ export async function createApp({ echo = false, watch = false } = {}) {
   app.moodModule = moodModuleRef
   app.memoryModule = memoryModuleRef
   app.speakupModule = speakupModuleRef
+  app.biliModule = biliModuleRef
+  app.qzoneSocialModule = qzoneSocialModuleRef
   exports_app = app
   return app
 }

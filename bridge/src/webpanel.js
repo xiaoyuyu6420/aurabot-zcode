@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { redact } from './core/redact.js'
 import { dataRoot } from './core/store.js'
 import { edgeInstalled, installEdge, textToSpeech } from './voice/tts.js'
+import { runOpenAction, checkToken, openToken } from './open.js'
 
 const PLUGIN_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugin', 'aurabot')
 const BRIDGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -509,6 +510,28 @@ export function startWebPanel({ getApp, port = 51073 }) {
       }
       if (req.method === 'GET' && path === '/api/log') {
         return send(200, redact(tailLogs(ws(), 80).join('\n')), 'text/plain; charset=utf-8')
+      }
+      // ================= M5 开放 HTTP 接口 =================
+      if (req.method === 'GET' && path === '/api/open-token') {
+        // 只在本机回环上发放 token
+        if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress || '')) return json(403, { error: 'token 只对本机进程发放' })
+        return json(200, { token: openToken() })
+      }
+      if (req.method === 'POST' && path === '/api/open') {
+        let body = ''
+        req.on('data', (c) => { body += c; if (body.length > 1e5) req.destroy() })
+        req.on('end', () => {
+          try {
+            const { action, params, token } = JSON.parse(body || '{}')
+            if (!checkToken(token)) return json(401, { ok: false, message: 'token 不对（GET /api/open-token 本机可取）' })
+            runOpenAction({ hub: app.hub, onebot: app.onebot, getConfig: cfg, zcode: app.zcode, app }, String(action || ''), params || {})
+              .then((r) => json(200, r))
+              .catch((error) => json(200, { ok: false, message: error.message }))
+          } catch (error) {
+            json(400, { ok: false, message: '请求体不是 JSON：' + error.message })
+          }
+        })
+        return
       }
 
       // ================= DSH 原版面板兼容层（/aurabot/api/*）=================

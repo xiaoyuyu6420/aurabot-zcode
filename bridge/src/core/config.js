@@ -68,6 +68,34 @@ export const DEFAULTS = {
     awakeFrom: 8,
     awakeTo: 23,
   },
+  // M5 模块
+  bili: {
+    enabled: false, // 开了才会定时刷
+    cookie: '', // B 站 Cookie（面板里填 SESSDATA 那串）；不填只能看视频不能评论
+    keywords: [], // 她刷 B 站爱搜的关键词
+    autoBrowse: true, // 定时自己去刷
+    intervalHours: 4, // 每隔几小时刷一轮
+    maxRunsPerDay: 3,
+    perRun: 3, // 一轮看几个视频
+    minViews: 10000, // 搜出来的视频播放量门槛
+    maxAgeDays: 90, // 太老的不看
+    comment: true, // 看完想评就评（像普通观众）
+    maxCommentsPerDay: 3,
+    like: true, // 看完顺手点个赞
+    shareToOwner: true, // 觉得主人会喜欢的私聊分享
+    reply: true, // 看别人回她的评论并接着回
+    maxRepliesPerDay: 5,
+  },
+  qzoneSocial: {
+    enabled: false,
+    replyOwn: true, // 回复自己说说下的新评论
+    commentFriends: true, // 逛好友动态，偶尔评一句
+    like: true,
+    friendChance: 0.3, // 好友的说说按概率互动
+    ownerChance: 0.7, // 主人的说说
+    maxPerDay: 8,
+    intervalMin: 30,
+  },
   persona: { current: 'dafeiyu' },
   group: { ...DEFAULT_GROUP_POLICY, overrides: {} },
 }
@@ -158,6 +186,32 @@ export function normalize(raw) {
   sp.maxPerDay = num(sp.maxPerDay, 4, 0, 20)
   sp.awakeFrom = num(sp.awakeFrom, 8, 0, 23)
   sp.awakeTo = num(sp.awakeTo, 23, 1, 24)
+  // M5 模块段钳制
+  const b = c.bili
+  b.enabled = bool(b.enabled, false)
+  b.cookie = String(b.cookie || '').trim()
+  b.keywords = (Array.isArray(b.keywords) ? b.keywords : String(b.keywords || '').split(/[,\s，]+/)).map((s) => String(s).trim()).filter(Boolean).slice(0, 20)
+  b.autoBrowse = bool(b.autoBrowse, true)
+  b.intervalHours = num(b.intervalHours, 4, 1, 24)
+  b.maxRunsPerDay = num(b.maxRunsPerDay, 3, 0, 10)
+  b.perRun = num(b.perRun, 3, 1, 6)
+  b.minViews = num(b.minViews, 10000, 0, 10_000_000)
+  b.maxAgeDays = num(b.maxAgeDays, 90, 0, 3650)
+  b.comment = bool(b.comment, true)
+  b.maxCommentsPerDay = num(b.maxCommentsPerDay, 3, 0, 20)
+  b.like = bool(b.like, true)
+  b.shareToOwner = bool(b.shareToOwner, true)
+  b.reply = bool(b.reply, true)
+  b.maxRepliesPerDay = num(b.maxRepliesPerDay, 5, 0, 20)
+  const q = c.qzoneSocial
+  q.enabled = bool(q.enabled, false)
+  q.replyOwn = bool(q.replyOwn, true)
+  q.commentFriends = bool(q.commentFriends, true)
+  q.like = bool(q.like, true)
+  q.friendChance = num(q.friendChance, 0.3, 0, 1)
+  q.ownerChance = num(q.ownerChance, 0.7, 0, 1)
+  q.maxPerDay = num(q.maxPerDay, 8, 0, 50)
+  q.intervalMin = num(q.intervalMin, 30, 5, 1440)
   const z = c.zcode
   z.cjsPath = String(z.cjsPath || '').trim()
   z.nodePath = String(z.nodePath || '').trim()

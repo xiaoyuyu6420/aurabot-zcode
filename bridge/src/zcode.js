@@ -143,6 +143,26 @@ export function createZcodeDriver({ getConfig, log }) {
     }
   }
 
+  /** 后台小任务：在指定目录跑一轮独立会话（不复用聊天会话表，也不写 sessions.json）。B 站/空间这类「她自己在后台想」的动作用。 */
+  async function runOnceIn(dir, prompt, { timeoutMs = 180000 } = {}) {
+    await slot()
+    running++
+    try {
+      const cfg = getConfig().zcode
+      const args = [cjsPath(), '-p', String(prompt), '--json', '--cwd', dir, '--surface', 'terminal', '--locale', 'zh-CN']
+      if (cfg.mode) args.push('--mode', cfg.mode)
+      // 后台任务不需要动文件：比照社交档收紧
+      const disallowed = new Set(cfg.disallowedTools)
+      for (const t of ['Write', 'Edit', 'Bash']) disallowed.add(t)
+      if (disallowed.size) args.push('--disallowed-tools', [...disallowed].join(','))
+      const r = await runOnce(args, { timeoutMs })
+      return { text: r.response, sessionId: r.sessionId, usage: r.usage }
+    } finally {
+      running--
+      releaseSlot()
+    }
+  }
+
   /** 忘掉某个聊天的会话（/reset 用）：下一条消息开新会话。 */
   function forget(chatId) {
     const t = table()
@@ -181,6 +201,7 @@ export function createZcodeDriver({ getConfig, log }) {
 
   return {
     turn,
+    runOnceIn,
     forget,
     forgetAll,
     ping,

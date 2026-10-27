@@ -47,7 +47,10 @@ function runOnce(args, timeoutMs) {
  * @returns {Promise<string>} 模型正文
  */
 export async function askModel(_dsh, o = (typeof _dsh === 'object' && _dsh && _dsh.text !== undefined) ? _dsh : {}) {
-  const cjs = detectCjs('')
+  const cfgMod = await import('./config.js')
+  // 用主人配置的 cjsPath（config.json 的 zcode 段）——detectCjs 的候选路径不一定覆盖部署位置（如 ZCodeAurabot）
+  const configured = cfgMod.loadConfig().zcode.cjsPath
+  const cjs = detectCjs(configured)
   if (!cjs) throw new Error('找不到 zcode.cjs')
   const prompt = (o.system ? `[系统要求] ${o.system}\n\n` : '') + (o.text || '')
   const args = [cjs, '-p', prompt, '--json', '--surface', 'terminal', '--locale', 'zh-CN']

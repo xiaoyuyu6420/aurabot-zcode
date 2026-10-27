@@ -32,6 +32,24 @@ async function bridgeConfig() {
 }
 const workspaceDir = () => join(BRIDGE_DIR, 'workspace')
 
+// 桥运行时的重型模块（onebot / hub / store）按需加载；桥 daemon 没跑时这些工具不可用
+const lazyRT = {}
+async function rt(mod) {
+  if (!BRIDGE_DIR) throw new Error('找不到 aurabot 桥仓库')
+  if (!lazyRT[mod]) lazyRT[mod] = await import(pathToFileURL(join(BRIDGE_DIR, 'bridge', 'src', mod)).href)
+  return lazyRT[mod]
+}
+
+/** 桥 daemon 的健康 HTTP 口（webpanel 与单例锁共用 51073）：能应答 = 桥在跑、onebot 可用。 */
+async function bridgeAlive() {
+  try {
+    const r = await fetch('http://127.0.0.1:51073/aurabot/api/state', { signal: AbortSignal.timeout(3000) })
+    return r.ok
+  } catch (error) {
+    return false
+  }
+}
+
 // 密钥类字段不进模型/面板
 const SECRET_PATHS = [['snowluma', 'webuiPassword'], ['snowluma', 'httpToken'], ['snowluma', 'wsToken']]
 function stripSecrets(cfg) {
@@ -153,6 +171,69 @@ async function resetSessions(chatId) {
   return { resetAll: true, count: n }
 }
 
+// ---------------- 对话内 QQ 工具（M2 收尾）：走桥 daemon 的开放 HTTP 口 ----------------
+
+/** 调桥 daemon 的开放接口（M5：POST /api/open）。桥没跑时报错。token 从桥上现取（本机回环才发放）。 */
+async function openCall(action, params = {}) {
+  if (!(await bridgeAlive())) throw new Error('桥进程没在运行（aurabot.js start），QQ 相关工具暂时用不了')
+  let token = ''
+  try {
+    const tr = await fetch('http://127.0.0.1:51073/api/open-token', { signal: AbortSignal.timeout(3000) })
+    token = (await tr.json()).token || ''
+  } catch (error) {}
+  const r = await fetch('http://127.0.0.1:51073/api/open', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ action, params, token }),
+    signal: AbortSignal.timeout(45000),
+  })
+  const j = await r.json().catch(() => ({ ok: false, message: '桥返回了不认识的响应' }))
+  if (!j.ok) throw new Error(j.message || '桥拒绝了这次调用')
+  return j
+}
+
+async function qqChatHistory({ chatId, count }) {
+  const n = Math.max(1, Math.min(50, Number(count) || 20))
+  const j = await openCall('chat_history', { chatId, count: n })
+  return j.lines ? j.lines.join('\n') : '没翻到聊天记录'
+}
+
+async function qqSendSticker({ chatId, name }) {
+  const j = await openCall('send_sticker', { chatId, name })
+  return '发了'
+}
+
+async function qqListStickers({ query } = {}) {
+  const { createStickerStore } = await rt('features/stickers.js')
+  const m = await bridgeConfig()
+  const store = createStickerStore({ dsh: null, getConfig: m.loadConfig, onebot: null, log: null })
+  const items = store.library().items
+  const q = String(query || '').trim()
+  const hit = (q ? items.filter((i) => (i.name || '').includes(q) || (i.tags || []).some((t) => t.includes(q))) : items).slice(-60)
+  return {
+    count: items.length,
+    text: hit.length ? hit.map((i) => `${i.name || '未命名'}${i.tags?.length ? '（' + i.tags.join('/') + '）' : ''}`).join('、') : '没有符合的表情',
+  }
+}
+
+async function qqEditSticker({ sticker, newName, tags, del }) {
+  const { createStickerStore } = await rt('features/stickers.js')
+  const m = await bridgeConfig()
+  const store = createStickerStore({ dsh: null, getConfig: m.loadConfig, onebot: null, log: null })
+  const item = store.match(String(sticker || ''))
+  if (!item) throw new Error('表情库里没找到这张')
+  const label = item.name || item.md5.slice(0, 8)
+  if (del) {
+    const r = await store.remove(item.md5)
+    if (!r.ok) throw new Error(r.reason || '没删成')
+    return `删掉了「${label}」`
+  }
+  if (!newName && !(Array.isArray(tags) && tags.length)) throw new Error('要说改成什么')
+  const r = store.rename(item.md5, newName ? String(newName).trim().slice(0, 12) : undefined, Array.isArray(tags) && tags.length ? tags.map((t) => String(t).trim()).filter(Boolean).slice(0, 5) : undefined)
+  if (!r.ok) throw new Error('没改成')
+  return `改好了：「${label}」→「${r.item.name}」${r.item.tags?.length ? '（' + r.item.tags.join('/') + '）' : ''}`
+}
+
 // ---------------- MCP 协议 ----------------
 
 const TOOLS = [
@@ -185,6 +266,47 @@ const TOOLS = [
     description: '忘掉机器人的 CLI 会话：指定 chatId（如 private:672178818）重置单个聊天；不指定则全部重置（下一条消息开新会话，聊天记录不删）。',
     inputSchema: { type: 'object', properties: { chatId: { type: 'string' } } },
   },
+  // —— M2 收尾：对话内 QQ 工具（大肥鱼在 zcode 会话里直接用）——
+  {
+    name: 'qq_chat_history',
+    description: '翻一个 QQ 聊天之前的聊天记录（只读，最多 50 条）。想不起前面聊过什么、别人问「刚才谁说的」、要回顾一段对话时用。chatId 形如 private:QQ号 或 group:群号；不知道当前聊天 ID 就先看 aurabot_overview 的 sessions。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        chatId: { type: 'string', description: 'private:QQ号 或 group:群号' },
+        count: { type: 'number', description: '要翻多少条，默认 20，最多 50' },
+      },
+      required: ['chatId'],
+    },
+  },
+  {
+    name: 'qq_send_sticker',
+    description: '往一个 QQ 聊天里发一张表情包（回复之外单独补发用；正常回复里直接写 <sticker:名字> 就行）。name 写表情名字或情绪（如「委屈」「开心」）。',
+    inputSchema: {
+      type: 'object',
+      properties: { chatId: { type: 'string', description: 'private:QQ号 或 group:群号' }, name: { type: 'string', description: '表情名字或情绪关键词' } },
+      required: ['chatId', 'name'],
+    },
+  },
+  {
+    name: 'qq_list_stickers',
+    description: '看看表情库里有哪些表情（名字和标签），挑表情前可以先看。',
+    inputSchema: { type: 'object', properties: { query: { type: 'string', description: '可选，按名字/标签筛选' } } },
+  },
+  {
+    name: 'qq_edit_sticker',
+    description: '整理表情库：改名字、改标签或删除。sticker 写现在的名字或标签（模糊匹配）。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sticker: { type: 'string', description: '要改的那张表情现在的名字或标签' },
+        newName: { type: 'string', description: '新名字（12 字以内，不改就不填）' },
+        tags: { type: 'array', items: { type: 'string' }, description: '新标签（不改就不填）' },
+        delete: { type: 'boolean', description: 'true = 删掉这张表情' },
+      },
+      required: ['sticker'],
+    },
+  },
 ]
 
 const PANEL_URI = 'ui://aurabot/panel.html'
@@ -208,6 +330,17 @@ async function callTool(name, args) {
       const r = await resetSessions(a.chatId)
       return { content: [{ type: 'text', text: JSON.stringify(r) }], structuredContent: r }
     }
+    case 'qq_chat_history':
+      return { content: [{ type: 'text', text: await qqChatHistory(a) }] }
+    case 'qq_send_sticker':
+      await qqSendSticker(a)
+      return { content: [{ type: 'text', text: '发了' }] }
+    case 'qq_list_stickers': {
+      const r = await qqListStickers(a)
+      return { content: [{ type: 'text', text: r.text }], structuredContent: r }
+    }
+    case 'qq_edit_sticker':
+      return { content: [{ type: 'text', text: await qqEditSticker(a) }] }
     default:
       throw new Error(`未知工具：${name}`)
   }
