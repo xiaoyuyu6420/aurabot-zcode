@@ -6,6 +6,7 @@
 //   dry on/off   试运行开关（开着只记日志不真发）
 //   setup        交互式首次向导（机器人号 / 主人号 / SnowLuma 目录）
 //   sim "文本"   模拟主人私聊一条消息：全链路跑一遍（会真调 ZCode，但不往 QQ 发）
+//   speakup      主动搭话：fire 现在就叫她来找你；不带参数看状态
 //   sessions     每个 QQ 聊天的 CLI 会话表
 //   reset [聊天]  忘掉会话，下一条消息开新会话
 //   persona      人格列表 / 切换（aurabot persona <id>）
@@ -124,6 +125,23 @@ async function main() {
       for (const [chatId, e] of rows) console.log(`${chatId.padEnd(16)}${String(e.turns ?? '?').padEnd(6)} ${new Date(e.updatedAt).toLocaleString()}   ${e.sessionId || '（下一条开新会话）'}`)
       break
     }
+    case 'speakup': {
+      // 手动叫她来私聊找主人（真调 ZCode 生成，capture 住不发 QQ——要真发就开总开关等定时）
+      if (rest[0] === 'fire') {
+        if (!cfg().ownerQQ) fail('先跑 setup 填主人号')
+        app.patchConfigLive((c) => ({ ...c, enabled: true }))
+        console.log('让她现在来找你（会真调 ZCode，不发 QQ）…')
+        const { sent } = await app.hub.capture(() => app.speakupModule.fire('手动'))
+        await app.hub.idle()
+        console.log('\n— 会发到 QQ 的内容 —')
+        for (const s of sent || []) console.log(`[${s.chatId}] ${s.note}`)
+        if (!sent?.length) console.log('（她选择沉默或没产出——看日志：node aurabot.js log）')
+        break
+      }
+      const s = app.speakupModule.state()
+      console.log(`今天已主动找过你 ${s.count} 次；下次评估在日程内自动进行（醒来时段 ${cfg().speakUp.awakeFrom}:00–${cfg().speakUp.awakeTo}:00，空闲 ${cfg().speakUp.idleMinutes} 分钟以上）`)
+      break
+    }
     case 'reset': {
       const chatId = rest[0]
       if (chatId) { app.hub.resetChat(chatId); ok(`已忘掉 ${chatId} 的会话`) }
@@ -168,6 +186,7 @@ async function main() {
   node aurabot.js on | off         总开关
   node aurabot.js dry on | off     试运行开关
   node aurabot.js sim "文本" [--group 群号]   模拟一条消息（真调 ZCode，不发 QQ）
+  node aurabot.js speakup fire               现在就叫她主动来找你（不发 QQ）
   node aurabot.js sessions         会话表
   node aurabot.js reset [聊天ID]   忘掉会话
   node aurabot.js persona [id]     人格列表 / 切换

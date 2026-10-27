@@ -1,6 +1,6 @@
 // 桥进程配置：默认值 + 归一化 + 读写。配置文件 workspace/config.json
-// 上游 config.js 的裁剪版：砍掉了 M1 用不到的模块段（voice/stickers/diary/bili/qzone/song/imageGen/local/bridge/模块内核），
-// 新增 zcode 段（CLI 驱动）。被砍掉的段在对应里程碑搬模块时再加回来。
+// 上游 config.js 的裁剪版：砍掉了 M1 用不到的模块段（diary/bili/qzone/song/imageGen/local/bridge/模块内核），
+// 新增 zcode 段（CLI 驱动）。被砍掉的段在对应里程碑搬模块时再加回来（M4 已补 voice/speakUp）。
 
 import { dataRoot, readJson, writeJson } from './store.js'
 import { join } from 'node:path'
@@ -44,6 +44,30 @@ export const DEFAULTS = {
   mood: { enabled: true, halfLifeHours: 3, judge: false }, // judge：每轮聊完用模型判一次心情（更准，多一次小任务）；关着用关键词
   memory: { enabled: true, recallCount: 6, dailyConsolidate: true, consolidateTimes: ['04:00', '16:00'] }, // 每天这几个时间把流水整理进长期记忆
   stickers2: { enabled: true, autoChance: 0.35, collect: true, maxPerHour: 20, maxLibrary: 300 },
+  // M4 模块
+  voice: {
+    enabled: true,
+    // auto = 先 edge-tts，不行用 Windows 语音；edge / windows / cosyvoice / gptsovits / http = 指定引擎（失败都会退回 Windows 语音）
+    engine: 'auto',
+    cosyvoice: { url: 'http://127.0.0.1:50000', mode: 'sft', spkId: '中文女', instruct: '', sampleRate: 22050 },
+    gptsovits: { url: 'http://127.0.0.1:9880', refAudio: '', promptText: '', promptLang: 'zh', textLang: 'zh' },
+    http: { urlTemplate: '' }, // 通用：GET 这个地址（{text} 会替换成要念的话），返回音频
+    voice: 'zh-CN-XiaoyiNeural',
+    rate: '+0%',
+    pitch: '+0Hz',
+    autoChance: 0.15, // 短回复自动变语音的概率
+    autoMaxChars: 80,
+  },
+  speakUp: {
+    enabled: true, // 只在和主人的私聊里主动找你，群里不会
+    idleMinutes: 40,
+    minIntervalMinutes: 60,
+    maxIntervalMinutes: 180,
+    maxPerDay: 4,
+    nudge: true, // 她问了你一句、你一直没回时，偶尔轻轻追一句
+    awakeFrom: 8,
+    awakeTo: 23,
+  },
   persona: { current: 'dafeiyu' },
   group: { ...DEFAULT_GROUP_POLICY, overrides: {} },
 }
@@ -111,6 +135,29 @@ export function normalize(raw) {
   s2.collect = bool(s2.collect, true)
   s2.maxPerHour = num(s2.maxPerHour, 20, 0, 200)
   s2.maxLibrary = num(s2.maxLibrary, 300, 20, 2000)
+  // M4 模块段钳制
+  const v = c.voice
+  v.enabled = bool(v.enabled, true)
+  v.autoChance = num(v.autoChance, 0.15, 0, 1)
+  v.autoMaxChars = num(v.autoMaxChars, 80, 1, 500)
+  v.voice = String(v.voice || 'zh-CN-XiaoyiNeural').trim()
+  v.rate = /^\+\d+%$|^-\d+%$/.test(String(v.rate)) ? v.rate : '+0%'
+  v.pitch = /^\+\d+Hz$|^-\d+Hz$/.test(String(v.pitch)) ? v.pitch : '+0Hz'
+  if (!['auto', 'edge', 'windows', 'cosyvoice', 'gptsovits', 'http'].includes(v.engine)) v.engine = 'auto'
+  if (!isObj(v.cosyvoice)) v.cosyvoice = structuredClone(DEFAULTS.voice.cosyvoice)
+  if (!isObj(v.gptsovits)) v.gptsovits = structuredClone(DEFAULTS.voice.gptsovits)
+  if (!isObj(v.http)) v.http = { urlTemplate: '' }
+  v.cosyvoice.sampleRate = num(v.cosyvoice.sampleRate, 22050, 8000, 48000)
+  if (!['sft', 'instruct'].includes(v.cosyvoice.mode)) v.cosyvoice.mode = 'sft'
+  const sp = c.speakUp
+  sp.enabled = bool(sp.enabled, true)
+  sp.idleMinutes = num(sp.idleMinutes, 40, 5, 1440)
+  sp.nudge = bool(sp.nudge, true)
+  sp.minIntervalMinutes = num(sp.minIntervalMinutes, 60, 5, 1440)
+  sp.maxIntervalMinutes = Math.max(sp.minIntervalMinutes, num(sp.maxIntervalMinutes, 180, 5, 2880))
+  sp.maxPerDay = num(sp.maxPerDay, 4, 0, 20)
+  sp.awakeFrom = num(sp.awakeFrom, 8, 0, 23)
+  sp.awakeTo = num(sp.awakeTo, 23, 1, 24)
   const z = c.zcode
   z.cjsPath = String(z.cjsPath || '').trim()
   z.nodePath = String(z.nodePath || '').trim()

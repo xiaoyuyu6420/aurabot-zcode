@@ -16,6 +16,7 @@ import { createHub } from './chat/hub.js'
 import { createZcodeDriver, detectCjs } from './zcode.js'
 import { seedPersonas, currentPersonaText, rulesText } from './persona/personas.js'
 import { createDshBridge } from './core/llm.js'
+import { textToSpeech } from './voice/tts.js'
 
 /** 会话工作区的 AGENTS.md = 人格 + 规则。人格换了 / 规则变了就重写，zcode CLI 每回合都会读到。 */
 export function buildWorkspace(cfg) {
@@ -156,6 +157,14 @@ export async function createApp({ echo = false, watch = false } = {}) {
     getConfig,
     log: logger.child('chat'),
     onebot,
+    // M4 模块：语音条（关着时自动退回发文字）
+    tts: {
+      speak: (text) => {
+        const v = cfg.voice || {}
+        if (v.enabled === false) throw new Error('语音关着')
+        return textToSpeech(text, v, logger.child('voice'))
+      },
+    },
     // M3 模块：表情 / 心情 / 记忆（关着时行为自动退回纯文本）
     stickers: {
       match: (q) => app.stickersModule?.match?.(q) ?? null,
@@ -190,7 +199,7 @@ export async function createApp({ echo = false, watch = false } = {}) {
           const kind = chatId.startsWith('group:') ? 'group' : 'private'
           const userId = kind === 'group' ? '' : chatId.slice(8)
           const groupId = kind === 'group' ? chatId.slice(6) : ''
-          const ctx = memoryModule.contextFor(
+          const ctx = app.memoryModule.contextFor(
             { kind, chatId, userId, groupId },
             chatId,
             // 桥内扩展：把本轮消息文本直接给 contextFor（上游从 hub.lastTextOf 拿）
@@ -203,11 +212,12 @@ export async function createApp({ echo = false, watch = false } = {}) {
     },
   })
 
-  // ---------- M3 模块实例 ----------
+  // ---------- M3/M4 模块实例 ----------
   const dshBridge = createDshBridge()
   let stickersModuleRef = null
   let moodModuleRef = null
   let memoryModuleRef = null
+  let speakupModuleRef = null
   {
     const slog = logger.child('stickers')
     const { createStickerStore } = await import('./features/stickers.js')
@@ -239,6 +249,12 @@ export async function createApp({ echo = false, watch = false } = {}) {
     })
     log.info('记忆模块已加载')
   }
+  {
+    // M4：主动搭话（主人一阵子没理她时，在私聊里主动找主人说几句）
+    const { createSpeakUp } = await import('./features/companion.js')
+    speakupModuleRef = createSpeakUp({ getConfig, hub, log: logger.child('speakup'), isMuted: () => false })
+    log.info('主动搭话模块已加载')
+  }
 
   // ---------- 启动 / 看门狗 ----------
   let watchdogTimer = null
@@ -263,12 +279,18 @@ export async function createApp({ echo = false, watch = false } = {}) {
       }
     }
     // M3：记忆的定时整理（每天 consolidateTimes 把流水提炼进长期记忆）
-    if (memoryModule?.tick) {
+    if (app.memoryModule?.tick) {
       try {
-        const r = await memoryModule.tick()
+        const r = await app.memoryModule.tick()
         if (r && r.ok && r.message) log.info('记忆整理：', r.message)
       } catch (error) {
         log.debug('记忆整理失败：', error.message)
+      }
+    }
+    // M4：主动搭话的定时评估（每次看门狗醒时评一次，内部自己判断到没到点）
+    if (app.speakupModule?.tick) {
+      try { await app.speakupModule.tick() } catch (error) {
+        log.debug('主动搭话评估失败：', error.message)
       }
     }
   }
@@ -301,8 +323,8 @@ export async function createApp({ echo = false, watch = false } = {}) {
 
   const app = {
     logger, log, getConfig, setConfig,
-    // M3 模块实例（面板与 webpanel 用）
-    stickersModule: null, moodModule: null, memoryModule: null,
+    // M3/M4 模块实例（面板与 webpanel 用）
+    stickersModule: null, moodModule: null, memoryModule: null, speakupModule: null,
     /** 只改内存里的配置（不落盘）：sim 这类本地测试用它临时放行，不碰真实的总开关。 */
     patchConfigLive(patch) {
       cfg = { ...cfg, ...patch(cfg) }
@@ -332,6 +354,7 @@ export async function createApp({ echo = false, watch = false } = {}) {
   app.stickersModule = stickersModuleRef
   app.moodModule = moodModuleRef
   app.memoryModule = memoryModuleRef
+  app.speakupModule = speakupModuleRef
   exports_app = app
   return app
 }

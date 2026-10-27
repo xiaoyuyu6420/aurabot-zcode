@@ -8,6 +8,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { redact } from './core/redact.js'
 import { dataRoot } from './core/store.js'
+import { edgeInstalled, installEdge, textToSpeech } from './voice/tts.js'
 
 const PLUGIN_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugin', 'aurabot')
 const BRIDGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -136,6 +137,7 @@ function makeDshApi(getApp) {
   const appRef = () => getApp() || {}
   const cfg = () => appRef().getConfig()
   const ws = () => cfg().zcode.workspaceDir || dataRoot()
+  const voiceEdgeInstalled = () => { try { return edgeInstalled() } catch (error) { return false } }
 
   async function overview() {
     const c = cfg()
@@ -172,10 +174,10 @@ function makeDshApi(getApp) {
       stickers: { count: (appRef().stickersModule?.library?.().items || []).length },
       diary: { next: 0, last: null },
       qzoneSocial: null,
-      speakUp: { count: 0 },
+      speakUp: appRef().speakupModule?.state?.() ?? { count: 0 },
       memory: { lastConsolidate: appRef().memoryModule?.lastConsolidate?.() ?? 0 },
       avatar: (() => { try { return { custom: true, at: statSync(join(UPSTREAM_ROOT, 'assets', 'dafeiyu.jpg')).mtimeMs } } catch (error) { return { custom: false, at: 0 } } })(),
-      voice: { edgeInstalled: false },
+      voice: { edgeInstalled: voiceEdgeInstalled() },
       song: null,
       sessions: appRef().hub.sessions(),
       workspaceDir: ws(),
@@ -339,10 +341,31 @@ function makeDshApi(getApp) {
     if (sub === '/qzone/social/state') return json(200, { ok: true, enabled: false })
     if (sub === '/song/status' || sub === '/song/account') return json(200, { ok: true, enabled: false })
     if (sub === '/song/drives') return json(200, { ok: true, drives: [] })
+    // M4：语音（试听 / 装 edge-tts）与主动搭话（手动叫她来找你）
+    if (sub === '/voice/test') {
+      try {
+        const { file, engine } = await textToSpeech(String(body.text || '你好呀，我是大肥鱼'), cfg().voice || {}, appRef().log)
+        const buf = readFileSync(file)
+        return json(200, { ok: true, engine, mime: file.endsWith('.wav') ? 'audio/wav' : 'audio/mpeg', data: buf.toString('base64') })
+      } catch (error) {
+        return json(200, { ok: false, message: '语音没合成出来：' + error.message })
+      }
+    }
+    if (sub === '/voice/install') {
+      const r = await installEdge(appRef().log)
+      return json(200, { ...r, edgeInstalled: edgeInstalled() })
+    }
+    if (sub === '/speakup/fire') {
+      const st = appRef().speakupModule
+      if (!cfg().enabled) return json(200, { ok: false, message: '先打开总开关' })
+      if (!st) return json(200, { ok: false, message: '主动搭话模块没加载' })
+      await st.fire('手动')
+      return json(200, { ok: true, message: '叫她去找你了' })
+    }
     if (sub === '/voice/asr-status') return json(200, { ok: true, phase: 'off' })
     if (sub === '/ext/') return json(200, { ok: true, html: '' })
-    // 其余写接口（sticker/*、song/*、voice/*、memory/*、modules/*、speakup/fire、style/save、qzone/*、bili/*、open/*、bridge/*）：统一提示未移植
-    return json(200, { ok: false, message: '这个功能还没移植到 ZCode 适配版（里程碑 M3-M5 会逐个搬过来）' })
+    // 其余写接口（song/*、memory/*、modules/*、style/save、qzone/*、bili/*、open/*、bridge/*）：统一提示未移植
+    return json(200, { ok: false, message: '这个功能还没移植到 ZCode 适配版（里程碑 M5 会逐个搬过来）' })
   }
 }
 

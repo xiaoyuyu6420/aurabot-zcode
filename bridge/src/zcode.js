@@ -48,8 +48,19 @@ export function createZcodeDriver({ getConfig, log }) {
     if (entry && entry.sessionId) args.push('--resume', entry.sessionId)
     for (const f of files || []) args.push('--attach', f)
     if (cfg.mode) args.push('--mode', cfg.mode)
-    if (cfg.disallowedTools.length) args.push('--disallowed-tools', cfg.disallowedTools.join(','))
+    // 社交档（群聊/非主人私聊）自动收紧：在主人配置的基础上再挡掉改文件和终端，双保险
+    const disallowed = new Set(cfg.disallowedTools)
+    if (socialChat(chatId)) for (const t of ['Write', 'Edit', 'Bash']) disallowed.add(t)
+    if (disallowed.size) args.push('--disallowed-tools', [...disallowed].join(','))
     return args
+  }
+
+  /** 群聊或非主人的私聊：社交档。chatId 形如 group:123 / private:456；system: / 空 = 后台任务，也按社交档。 */
+  function socialChat(chatId) {
+    const [kind, id] = String(chatId || '').split(':')
+    if (kind === 'group') return true
+    if (kind === 'private') return String(id) !== String(getConfig().ownerQQ)
+    return true // system:、tmp/ask 等后台会话不给写权限（里面只跑小任务）
   }
 
   const cjsPath = () => {

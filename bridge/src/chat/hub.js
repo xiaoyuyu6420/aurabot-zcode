@@ -40,6 +40,8 @@ export function createHub({ zcode, getConfig, log, onebot, stickers, tts, onComm
   const stats = { received: 0, sent: 0, voice: 0, stickers: 0, errors: 0, day: new Date().toDateString() }
   let selfId = ''
   let lastChatAt = 0
+  let lastOwnerChatAt = 0 // 主人最近一次说话（主动搭话的「多久没来往」用）
+  let lastBotToOwner = { at: 0, text: '' } // 她在主人私聊里最后说的话（追问用）
 
   function bump(k) {
     const d = new Date().toDateString()
@@ -212,18 +214,23 @@ export function createHub({ zcode, getConfig, log, onebot, stickers, tts, onComm
       return
     }
     let items = r.items
-    // 对方明确要语音、她却只打了字：整段改成语音发（语音模块 M3 接入）
+    // 对方明确要语音、她却只打了字：整段改成语音发
     if (opts.wantVoice && tts?.speak && !items.some((i) => i.kind === 'voice')) {
       const spoken = items.filter((i) => i.kind === 'text').map((i) => i.value).join('，')
       if (spoken && spoken.length <= 300) items = [{ kind: 'voice', value: spoken }, ...items.filter((i) => i.kind !== 'text')]
+    }
+    // 短回复按概率自动变语音条（autoChance × 心情系数）
+    const voiceOn = Boolean(tts?.speak) && cfg.voice?.enabled !== false
+    const texts = items.filter((i) => i.kind === 'text')
+    if (voiceOn && items.length === texts.length && texts.length > 0) {
+      const all = texts.map((t) => t.value).join(' ')
+      if (all.length <= (cfg.voice?.autoMaxChars ?? 80) && Math.random() < (cfg.voice?.autoChance ?? 0.15) * mood().voice) items = [{ kind: 'voice', value: all }]
     }
     const inGroup = chatId.startsWith('group:')
     // 群里别刷屏：一段最多 3 条
     if (inGroup && items.length > 3) items = items.slice(0, 3)
     // 按概率补一张表情（群里已有两条以上就不补了；autoChance × 心情系数）
     {
-      const texts = items.filter((i) => i.kind === 'text')
-      const cfg = getConfig()
       const chance = (cfg.stickers2?.autoChance ?? 0.35) * mood().sticker
       if (stickers?.pickForReply && !items.some((i) => i.kind === 'sticker') && !(inGroup && items.length >= 2) && Math.random() < chance) {
         const pick = stickers.pickForReply(texts.map((t) => t.value).join(' '))
@@ -246,7 +253,7 @@ export function createHub({ zcode, getConfig, log, onebot, stickers, tts, onComm
       const replyId = it.replyTo ? refs[it.replyTo] : undefined
       if (it.replyTo && !replyId) log.debug(`${chatId}：引用的编号 ${it.replyTo} 对不上，正常发`)
       if (it.kind === 'text') await sendText(chatId, it.value, replyId)
-      else if (it.kind === 'voice') await sendVoice(chatId, it.value)
+      else if (it.kind === 'voice') { if (voiceOn || opts.wantVoice) await sendVoice(chatId, it.value); else await sendText(chatId, it.value) }
       else if (it.kind === 'sticker') await sendSticker(chatId, it.value, replyId)
       else if (it.kind === 'poke') { if (!opts.simulate) await pokeBack(chatId) }
       else if (it.kind === 'image') await sendImage(chatId, it.value)
@@ -262,6 +269,7 @@ export function createHub({ zcode, getConfig, log, onebot, stickers, tts, onComm
     }
     logChat(chatId, 'bot', items.map((i) => (i.kind === 'text' || i.kind === 'voice' ? i.value : `[${i.kind}]`)).join(' '))
     lastChatAt = Date.now()
+    if (chatId === `private:${cfg.ownerQQ}`) lastBotToOwner = { at: Date.now(), text: items.filter((i) => i.kind === 'text' || i.kind === 'voice').map((i) => i.value).join('\n') }
     onActivity?.({ kind: 'out', chatId, reply: text, userText: opts.userText || '' })
   }
 
@@ -422,7 +430,7 @@ export function createHub({ zcode, getConfig, log, onebot, stickers, tts, onComm
     for (const data of imgs) content.push({ type: 'image', data })
     logChat(msg.chatId, msg.nickname, text, msg.userId)
     lastChatAt = now
-    if (isOwner(cfg, msg.userId)) lastOwnerMsgAt = now
+    if (isOwner(cfg, msg.userId)) { lastOwnerMsgAt = now; if (msg.kind === 'private') lastOwnerChatAt = now }
     onActivity?.({ kind: 'in', chatId: msg.chatId, userId: msg.userId, nickname: msg.nickname, text, direct: msg.kind === 'private' || msg.mentioned || mode === 'must', owner: isOwner(cfg, msg.userId) })
 
     enqueue({ chatId: msg.chatId, kind: msg.kind, userId: msg.userId, groupId: msg.groupId, nickname: msg.nickname }, content, msg.userId, wantsVoice(msg.text), mode)
@@ -638,6 +646,28 @@ export function createHub({ zcode, getConfig, log, onebot, stickers, tts, onComm
     await deliver(chatId, r.text, { wantVoice: opts.wantVoice, userText: opts.userText || '', simulate: Boolean(cap) })
   }
 
+  /** 后台模块（主动搭话）直接把一段话交给某个会话跑一轮：不过防抖队列，busy 时排队到空闲。 */
+  async function pushToSession(chat, content, senderId, opts = {}) {
+    const text = content.filter((c) => c.type === 'text').map((c) => c.text).join('\n')
+    const chatId = chat.chatId
+    if (isBusy(chatId)) {
+      const p = pending.get(chatId) || { chat, texts: [], images: [], senders: new Set(), wantVoice: false, timer: null, firstAt: Date.now(), mode: 'must', count: 0 }
+      p.texts.push(text)
+      p.count++
+      pending.set(chatId, p)
+      p.waiting = true
+      return
+    }
+    busy.set(chatId, Date.now())
+    try {
+      await pushTurn(chatId, text, [], { wantVoice: opts.wantVoice, userText: text.slice(-600) })
+    } catch (error) {
+      log.error(`后台消息转进 ZCode 失败（${chatId}）：`, error.message)
+    } finally {
+      release(chatId)
+    }
+  }
+
   // 私聊里等她回复时，在 QQ 上显示「对方正在输入…」
   const typing = new Map() // chatId → timer
   function startTyping(chatId) {
@@ -700,6 +730,7 @@ export function createHub({ zcode, getConfig, log, onebot, stickers, tts, onComm
     sendSticker,
     sendImage,
     sendSegments,
+    pushToSession,
     resetChat,
     resetSessions,
     logChat,
@@ -712,6 +743,10 @@ export function createHub({ zcode, getConfig, log, onebot, stickers, tts, onComm
       for (const [k] of typing) stopTyping(k)
     },
     get lastChatAt() { return lastChatAt },
+    /** 主人最近一次在私聊里说话的时间（主动搭话的「多久没来往」）。 */
+    get lastOwnerChatAt() { return lastOwnerChatAt },
+    /** 她在主人私聊里最后说的话（追问：她问了一句、主人没回）。 */
+    get lastBotToOwner() { return lastBotToOwner },
     /** 这一「轮」里主人说过话吗——CLI 驱动下用时间窗口近似（5 分钟内主人发过消息）。 */
     turnHasOwner(chatId, windowMs = 5 * 60_000) { return Date.now() - lastOwnerMsgAt < windowMs },
     recentMedia: (chatId, userId) => (recentMediaMap.get(String(chatId)) || []).filter((x) => !userId || x.userId === String(userId)),
