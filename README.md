@@ -3,7 +3,7 @@
 把 [dsh-aurabot-qq](https://github.com/accomplish07zrh-eng/dsh-aurabot-qq)（DeepSeek Harness 的 QQ 人格机器人插件）适配到 [ZCode](https://github.com/zai-org/ZCode)（已开源）。
 
 - **适配规格**：[spec.md](./spec.md) —— 架构映射、开源核实结论（§0.5）、里程碑与验收标准
-- **上游源码**：`dsh-aurabot-qq/`（只读参照，v1.0.4，不直接修改）
+- **上游源码**：`dsh-aurabot-qq/`（只读参照，v1.0.4，不直接修改；git 里只存 gitlink，clone 后  补上）
 - **ZCode 源码**：`zcode-src/`（稀疏克隆只读参照：bots/services/docs/shared 等）
 - **M1 已完成**：`bridge/`（桥进程 + CLI）可用，见下文「当前状态」
 
