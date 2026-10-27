@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>大肥鱼控制台</title>
+<style>
+  :root { --bg:#101418; --card:#1a2028; --line:#2a323d; --fg:#e8ecf1; --dim:#8b98a5; --acc:#4da3ff; --ok:#3fb96f; --warn:#e6a23c; --bad:#e5615c; }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--fg); font:13px/1.6 "Segoe UI","Microsoft YaHei",sans-serif; padding:14px; }
+  h1 { font-size:16px; display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+  h1 .fish { font-size:20px; }
+  .chips { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px; }
+  .chip { padding:2px 10px; border-radius:99px; font-size:12px; border:1px solid var(--line); color:var(--dim); }
+  .chip.on { color:var(--ok); border-color:var(--ok); }
+  .chip.off { color:var(--dim); }
+  .chip.dry { color:var(--warn); border-color:var(--warn); }
+  .chip.gw-on { color:var(--ok); border-color:var(--ok); }
+  .chip.gw-off { color:var(--bad); border-color:var(--bad); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin-bottom:12px; }
+  .card h2 { font-size:13px; color:var(--dim); font-weight:600; margin-bottom:8px; letter-spacing:.5px; }
+  .row { display:flex; align-items:center; gap:10px; margin:6px 0; flex-wrap:wrap; }
+  .row label { min-width:110px; color:var(--dim); }
+  input[type=text], input[type=number], select { background:#0d1117; border:1px solid var(--line); color:var(--fg); border-radius:6px; padding:4px 8px; font:inherit; }
+  input[type=number] { width:90px; }
+  .btn { background:var(--acc); color:#fff; border:0; border-radius:6px; padding:5px 14px; font:inherit; cursor:pointer; }
+  .btn.ghost { background:transparent; border:1px solid var(--line); color:var(--fg); }
+  .btn.warn { background:var(--warn); }
+  .btn:disabled { opacity:.5; cursor:default; }
+  .big { display:flex; gap:10px; }
+  .big .btn { flex:1; padding:10px; font-size:14px; }
+  .switch { display:flex; gap:10px; }
+  .switch .btn.on { background:var(--ok); }
+  .switch .btn.ghost.on { border-color:var(--ok); color:var(--ok); }
+  .hint { color:var(--dim); font-size:12px; }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th, td { text-align:left; padding:4px 8px; border-bottom:1px solid var(--line); }
+  th { color:var(--dim); font-weight:500; }
+  .log { background:#0d1117; border:1px solid var(--line); border-radius:6px; padding:8px; font:11px/1.5 Consolas,monospace; max-height:180px; overflow:auto; white-space:pre-wrap; color:#9fb0c0; }
+  #toast { position:fixed; left:50%; bottom:18px; transform:translateX(-50%); background:var(--ok); color:#fff; padding:6px 18px; border-radius:99px; opacity:0; transition:opacity .3s; pointer-events:none; }
+  #toast.show { opacity:1; }
+  .err { color:var(--bad); }
+</style>
+</head>
+<body>
+<h1><span class="fish">🐟</span> 大肥鱼控制台 <span class="hint" id="bridgeDir"></span></h1>
+<div class="chips" id="chips"></div>
+
+<div class="card">
+  <h2>开关（保存后约 2 秒生效，不用重启服务）</h2>
+  <div class="switch big">
+    <button class="btn ghost" id="btnEnabled"></button>
+    <button class="btn ghost" id="btnDry"></button>
+  </div>
+  <div class="hint" style="margin-top:8px">总开关关着 = 一句都不回；试运行开 = 正常回复但只记日志、不真发到 QQ。</div>
+</div>
+
+<div class="card">
+  <h2>身份与白名单</h2>
+  <div class="row"><label>机器人 QQ</label><input type="text" id="botQQ" style="width:140px"><label style="min-width:auto">主人 QQ</label><input type="text" id="ownerQQ" style="width:140px"><label style="min-width:auto">称呼</label><input type="text" id="ownerName" style="width:90px"></div>
+  <div class="row"><label>群白名单</label><input type="text" id="groups" style="flex:1" placeholder="群号，逗号分隔"></div>
+  <div class="row"><label>私聊白名单</label><input type="text" id="private" style="flex:1" placeholder="QQ 号，逗号分隔（主人不用填）"></div>
+</div>
+
+<div class="card">
+  <h2>人格</h2>
+  <div class="row"><label>当前人格</label><select id="persona"></select><span class="hint" id="personaHint"></span></div>
+</div>
+
+<div class="card">
+  <h2>连发合并（秒）</h2>
+  <div class="row">
+    <label>私聊等待</label><input type="number" id="m_wait" step="0.5"><label>私聊上限</label><input type="number" id="m_max">
+    <label>群聊等待</label><input type="number" id="m_gwait"><label>群聊上限</label><input type="number" id="m_gmax">
+  </div>
+</div>
+
+<div class="card">
+  <h2>群聊插话策略</h2>
+  <div class="row"><label>插话概率</label><input type="number" id="g_chance" step="0.05" min="0" max="1"><label>冷却秒</label><input type="number" id="g_cool"><label>每小时上限</label><input type="number" id="g_max"><label>话题相关度</label><input type="number" id="g_rel" step="0.05" min="0" max="1"></div>
+  <div class="row"><label>叫醒词</label><input type="text" id="g_wake" style="flex:1" placeholder="逗号分隔，例如：大肥鱼,肥鱼"></div>
+  <div class="row"><label>静默时段</label><input type="number" id="g_q0" min="0" max="23"> 点 ～ <input type="number" id="g_q1" min="0" max="23"> 点 <span class="hint">（这段时间不主动插话，@ 仍然回）</span></div>
+</div>
+
+<div class="card">
+  <h2>ZCode 驱动</h2>
+  <div class="row"><label>单轮超时(分)</label><input type="number" id="z_timeout" min="1" max="30"><label>并发上限</label><input type="number" id="z_par" min="1" max="8"><label>换新会话轮数</label><input type="number" id="z_turns" min="0" max="1000"></div>
+</div>
+
+<div class="row" style="margin:2px 0 14px">
+  <button class="btn" id="btnSave">保存全部修改</button>
+  <span class="hint" id="saveHint">改完记得点保存</span>
+</div>
+
+<div class="card">
+  <h2>会话表（每个 QQ 聊天一个 ZCode 会话）</h2>
+  <table id="sessions"><thead><tr><th>聊天</th><th>轮数</th><th>最后活跃</th><th></th></tr></thead><tbody></tbody></table>
+  <div class="row" style="margin-top:8px"><button class="btn ghost" id="btnResetAll">全部重置（下一条消息开新会话）</button></div>
+</div>
+
+<div class="card">
+  <h2>最近日志</h2>
+  <div class="log" id="log">（点下方按钮加载）</div>
+  <div class="row" style="margin-top:8px"><button class="btn ghost" id="btnLog">刷新日志</button><button class="btn ghost" id="btnReload">重新载入配置</button></div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// 后端自适应：ZCode 插件场景走 window.zcode；桥进程 Web 面板场景走本地 /api。
+// apiCall(name, args) 统一入口，返回 CallToolResult 形状。
+let z = null
+let backend = 'none'
+let current = null      // aurabot_overview 的 config
+let personas = []
+
+const $ = (id) => document.getElementById(id)
+const num = (v) => Number(v)
+const toast = (msg) => { const t = $('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 1800) }
+
+async function zcodeCall(name, args) {
+  const r = await z.callTool(name, args || {})
+  if (r && r.isError) throw new Error((r.content || []).map((c) => c.text).join(' ') || '调用失败')
+  return r
+}
+async function webCall(name, args) {
+  let res
+  if (name === 'aurabot_overview') res = await fetch('/api/overview')
+  else if (name === 'aurabot_log') res = await fetch('/api/log')
+  else if (name === 'aurabot_config_set') res = await fetch('/api/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(args?.patch || {}) })
+  else if (name === 'aurabot_reset') res = await fetch('/api/reset', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(args || {}) })
+  else throw new Error('未知调用：' + name)
+  if (!res.ok) {
+    let msg = 'HTTP ' + res.status
+    try { msg = (await res.json()).error || msg } catch (e) {}
+    throw new Error(msg)
+  }
+  const ct = res.headers.get('content-type') || ''
+  if (ct.includes('json')) {
+    const j = await res.json()
+    // /api/config 返回 {ok,changed}；overview 直接是数据。统一成 CallToolResult 形状
+    if (name === 'aurabot_overview') return { structuredContent: j, content: [{ type: 'text', text: JSON.stringify(j) }] }
+    if (name === 'aurabot_config_set') return { structuredContent: j, content: [{ type: 'text', text: '已保存：' + (j.changed || []).join(', ') }] }
+    return { structuredContent: j, content: [{ type: 'text', text: JSON.stringify(j) }] }
+  }
+  return { content: [{ type: 'text', text: await res.text() }] }
+}
+async function call(name, args) {
+  return backend === 'zcode' ? zcodeCall(name, args) : webCall(name, args)
+}
+function parseStructured(r) {
+  if (r && r.structuredContent) return r.structuredContent
+  try { return JSON.parse((r.content || []).map((c) => c.text).join('')) } catch (e) { return {} }
+}
+
+function renderChips(cfg, gateway) {
+  const chips = []
+  chips.push(`<span class="chip ${cfg.enabled ? 'on' : 'off'}">总开关 ${cfg.enabled ? '开' : '关'}</span>`)
+  chips.push(`<span class="chip ${cfg.dryRun ? 'dry' : 'off'}">试运行 ${cfg.dryRun ? '开（不真发）' : '关'}</span>`)
+  const gmap = { connected: ['gw-on', '已连 QQ'], connecting: ['gw-off', '连接中'], disconnected: ['gw-off', '已断开'], stopped: ['gw-off', '未启动'], unknown: ['off', '未知'] }
+  const g = gmap[gateway] || gmap.unknown
+  chips.push(`<span class="chip ${g[0]}">网关：${g[1]}</span>`)
+  chips.push(`<span class="chip off">机器人 ${cfg.botQQ || '未设置'}</span>`)
+  $('chips').innerHTML = chips.join('')
+  const be = $('btnEnabled'), bd = $('btnDry')
+  be.textContent = cfg.enabled ? '总开关：开（点击关闭）' : '总开关：关（点击开启）'
+  be.classList.toggle('on', !!cfg.enabled)
+  bd.textContent = cfg.dryRun ? '试运行：开（点击真发）' : '试运行：关（真发中！点击改为只记日志）'
+  bd.classList.toggle('on', !!cfg.dryRun)
+}
+
+function fillForm(cfg) {
+  $('botQQ').value = cfg.botQQ || ''
+  $('ownerQQ').value = cfg.ownerQQ || ''
+  $('ownerName').value = cfg.ownerName || ''
+  $('groups').value = (cfg.allow?.groups || []).join(', ')
+  $('private').value = (cfg.allow?.private || []).join(', ')
+  const sel = $('persona')
+  sel.innerHTML = personas.map((p) => `<option value="${p.id}">${p.name}（${p.chars} 字）</option>`).join('') || '<option value="">（没有人格卡）</option>'
+  if (cfg.persona?.current) sel.value = cfg.persona.current
+  $('m_wait').value = cfg.merge?.waitSec; $('m_max').value = cfg.merge?.maxSec
+  $('m_gwait').value = cfg.merge?.groupWaitSec; $('m_gmax').value = cfg.merge?.groupMaxSec
+  $('g_chance').value = cfg.group?.interjectChance; $('g_cool').value = cfg.group?.cooldownSec
+  $('g_max').value = cfg.group?.maxPerHour; $('g_rel').value = cfg.group?.minRelevance
+  $('g_wake').value = (cfg.group?.wakeWords || []).join(', ')
+  $('g_q0').value = cfg.group?.quietHours?.[0] ?? 1; $('g_q1').value = cfg.group?.quietHours?.[1] ?? 8
+  $('z_timeout').value = Math.round((cfg.zcode?.timeoutMs || 300000) / 60000)
+  $('z_par').value = cfg.zcode?.maxParallel ?? 2
+  $('z_turns').value = cfg.zcode?.maxContextTurns ?? 0
+}
+
+function renderSessions(sessions) {
+  const tb = $('sessions').querySelector('tbody')
+  const rows = Object.entries(sessions || {})
+  if (!rows.length) { tb.innerHTML = '<tr><td colspan="4" class="hint">还没有会话（机器人收到消息后出现）</td></tr>'; return }
+  tb.innerHTML = rows.map(([id, e]) => `<tr>
+    <td>${id}</td><td>${e.turns ?? '?'}</td>
+    <td>${e.updatedAt ? new Date(e.updatedAt).toLocaleString('zh-CN', { hour12: false }) : '-'}</td>
+    <td><button class="btn ghost" data-chat="${id}">重置</button></td>
+  </tr>`).join('')
+  tb.querySelectorAll('button[data-chat]').forEach((b) => b.onclick = async () => {
+    if (!confirm(`忘掉 ${b.dataset.chat} 的会话？（聊天记录不删，下一条消息开新会话）`)) return
+    try { await call('aurabot_reset', { chatId: b.dataset.chat }); toast('已重置'); await reload() } catch (e) { toast(e.message) }
+  })
+}
+
+async function reload() {
+  const r = parseStructured(await call('aurabot_overview'))
+  current = r.config
+  personas = r.personas || []
+  $('bridgeDir').textContent = r.bridgeDir || ''
+  renderChips(current, r.gateway)
+  fillForm(current)
+  renderSessions(r.sessions)
+}
+
+function buildPatch() {
+  const p = {}
+  const qqList = (s) => s.split(/[\s,，;；]+/).map((x) => x.replace(/\D/g, '')).filter(Boolean)
+  const words = (s) => s.split(/[\s,，]+/).map((x) => x.trim()).filter(Boolean)
+  const setIf = (cond, fn) => { if (cond) fn() }
+  setIf($('botQQ').value !== (current.botQQ || ''), () => p.botQQ = $('botQQ').value)
+  setIf($('ownerQQ').value !== (current.ownerQQ || ''), () => p.ownerQQ = $('ownerQQ').value)
+  setIf($('ownerName').value !== (current.ownerName || ''), () => p.ownerName = $('ownerName').value)
+  const groups = qqList($('groups').value), priv = qqList($('private').value)
+  if (groups.join(',') !== (current.allow?.groups || []).join(',') || priv.join(',') !== (current.allow?.private || []).join(',')) p.allow = { groups, private: priv }
+  const pid = $('persona').value
+  if (pid && pid !== current.persona?.current) p.persona = { current: pid }
+  const m = { waitSec: num($('m_wait').value), maxSec: num($('m_max').value), groupWaitSec: num($('m_gwait').value), groupMaxSec: num($('m_gmax').value) }
+  if (JSON.stringify(m) !== JSON.stringify({ waitSec: current.merge?.waitSec, maxSec: current.merge?.maxSec, groupWaitSec: current.merge?.groupWaitSec, groupMaxSec: current.merge?.groupMaxSec })) p.merge = m
+  const g = {
+    interjectChance: num($('g_chance').value), cooldownSec: num($('g_cool').value), maxPerHour: num($('g_max').value),
+    minRelevance: num($('g_rel').value), wakeWords: words($('g_wake').value), quietHours: [num($('g_q0').value), num($('g_q1').value)],
+  }
+  const gPrev = { interjectChance: current.group?.interjectChance, cooldownSec: current.group?.cooldownSec, maxPerHour: current.group?.maxPerHour, minRelevance: current.group?.minRelevance, wakeWords: current.group?.wakeWords || [], quietHours: current.group?.quietHours || [] }
+  if (JSON.stringify(g) !== JSON.stringify(gPrev)) p.group = g
+  const z = { timeoutMs: num($('z_timeout').value) * 60000, maxParallel: num($('z_par').value), maxContextTurns: num($('z_turns').value) }
+  if (JSON.stringify(z) !== JSON.stringify({ timeoutMs: current.zcode?.timeoutMs, maxParallel: current.zcode?.maxParallel, maxContextTurns: current.zcode?.maxContextTurns })) p.zcode = z
+  return p
+}
+
+$('btnSave').onclick = async () => {
+  const patch = buildPatch()
+  if (!Object.keys(patch).length) { $('saveHint').textContent = '没有改动'; return }
+  try {
+    const r = parseStructured(await call('aurabot_config_set', { patch }))
+    toast('已保存：' + (r.changed || []).join(', '))
+    $('saveHint').textContent = '桥进程约 2 秒内热加载'
+    await reload()
+  } catch (e) { $('saveHint').innerHTML = `<span class="err">${e.message}</span>` }
+}
+$('btnEnabled').onclick = async () => {
+  try { await call('aurabot_config_set', { patch: { enabled: !current.enabled } }); toast(current.enabled ? '总开关已关' : '总开关已开'); await reload() } catch (e) { toast(e.message) }
+}
+$('btnDry').onclick = async () => {
+  if (!current.dryRun && !confirm('关闭试运行后，机器人会真发 QQ 消息。确定？')) return
+  try { await call('aurabot_config_set', { patch: { dryRun: !current.dryRun } }); toast(current.dryRun ? '试运行已关（真发）' : '试运行已开'); await reload() } catch (e) { toast(e.message) }
+}
+$('btnResetAll').onclick = async () => {
+  if (!confirm('全部会话重置？下一条消息开新会话，聊天记录不删。')) return
+  try { await call('aurabot_reset', {}); toast('已全部重置'); await reload() } catch (e) { toast(e.message) }
+}
+$('btnLog').onclick = async () => {
+  try {
+    const r = await call('aurabot_log', { lines: 60 })
+    $('log').textContent = (r.content || []).map((c) => c.text).join('\n') || '（空）'
+    $('log').scrollTop = $('log').scrollHeight
+  } catch (e) { $('log').textContent = '错误：' + e.message }
+}
+$('btnReload').onclick = () => reload().catch((e) => toast(e.message))
+
+// 连接：优先 Web 后端（本页面由桥进程 51073 直接伺服），否则等 window.zcode（ZCode 插件场景）
+async function boot() {
+  const tryWeb = async () => {
+    try {
+      const r = await fetch('/api/overview', { signal: AbortSignal.timeout(2500) })
+      if (r.ok) { backend = 'web'; return true }
+    } catch (e) {}
+    return false
+  }
+  const waitZ = () => new Promise((resolve) => {
+    let n = 0
+    const t = setInterval(() => {
+      if (window.zcode && window.zcode.ready) { clearInterval(t); resolve(true) }
+      else if (++n > 40) { clearInterval(t); resolve(false) }
+    }, 250)
+  })
+  if (await tryWeb()) { backend = 'web' }
+  else if (await waitZ()) { z = window.zcode; await z.ready(); backend = 'zcode' }
+  else { $('log').textContent = '连接失败： neither Web API nor ZCode host'; document.querySelectorAll('.btn').forEach((b) => (b.disabled = true)); return }
+  try { await reload() } catch (e) { $('log').textContent = '初始化失败：' + e.message }
+}
+boot()
+</script>
+</body>
+</html>

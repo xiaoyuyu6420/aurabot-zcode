@@ -1,0 +1,15 @@
+{
+  "name": "aurabot-local",
+  "plugins": [
+    {
+      "name": "aurabot",
+      "source": "./aurabot",
+      "version": "0.1.0",
+      "displayName": "Aurabot 大肥鱼控制台",
+      "displayName_i18n": { "zh-CN": "大肥鱼控制台" },
+      "description": "QQ 机器人「大肥鱼」的开关、人格、群聊策略、会话与日志面板",
+      "description_i18n": { "zh-CN": "QQ 机器人「大肥鱼」的开关、人格、群聊策略、会话与日志面板" },
+      "category": "utilities"
+    }
+  ]
+}

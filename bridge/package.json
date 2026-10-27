@@ -1,0 +1,13 @@
+{
+  "name": "aurabot-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Aurabot × ZCode 桥进程：QQ（OneBot v11 / SnowLuma）⇄ zcode CLI 会话",
+  "engines": { "node": ">=22" },
+  "bin": { "aurabot": "./aurabot.js" },
+  "scripts": {
+    "start": "node aurabot.js start",
+    "status": "node aurabot.js status"
+  }
+}

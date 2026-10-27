@@ -1,0 +1,23 @@
+# 运行时数据（各人自己生成）
+workspace/
+!workspace/personas/
+!workspace/AGENTS.md
+
+# ZCode 源码参照（自己 clone：git clone --depth 1 --filter=blob:none --sparse https://github.com/zai-org/ZCode.git zcode-src）
+zcode-src/
+
+# 本机 ZCode CLI 配置
+.zcode/
+
+# 依赖与产物
+node_modules/
+webui/vendor/
+dist/
+
+# 敏感与本机痕迹
+*.log
+*.sqlite*
+.v2c/
+.video_agent/
+config.json.bak*
+daemon.out

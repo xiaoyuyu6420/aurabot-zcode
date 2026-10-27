@@ -1,0 +1,41 @@
+{
+  "name": "aurabot",
+  "version": "0.1.0",
+  "description": "大肥鱼（Aurabot）控制台：机器人开关、人格、群聊策略、会话与日志面板",
+  "description_i18n": {
+    "en": "Aurabot console: switches, persona, group policy, sessions and logs for the QQ bot.",
+    "zh-CN": "大肥鱼控制台：机器人开关、人格、群聊策略、会话与日志面板。"
+  },
+  "author": {
+    "name": "aurabot-zcode"
+  },
+  "keywords": [
+    "qq",
+    "bot",
+    "aurabot"
+  ],
+  "mcpServers": {
+    "app": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "${ZCODE_PLUGIN_ROOT}/server/server.mjs"
+      ],
+      "env": {}
+    }
+  },
+  "ui": {
+    "surfaces": [
+      {
+        "id": "console",
+        "title": {
+          "en": "Aurabot",
+          "zh-CN": "大肥鱼"
+        },
+        "server": "app",
+        "resourceUri": "ui://aurabot/panel.html",
+        "availability": "session"
+      }
+    ]
+  }
+}
