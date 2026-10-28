@@ -23,6 +23,7 @@ QQ ⇄ SnowLuma(OneBot v11, C:\Aurabot\snowluma) ⇄ 桥进程 daemon ⇄ zcode 
 | M5 B 站/空间/开放接口 | ✅ | **B 站**（搜/看/字幕/热评/评论/回复；定时刷挂看门狗）；**QQ 空间互动**（回评论 + 逛好友动态）；**开放 HTTP 接口**（token 鉴权 + 白名单） |
 | **M6 收尾（全部功能）** | ✅ | **群管**（禁言/解禁/踢人/头衔/公告：turnHasOwner + 白名单 + 群身份三层校验；面板「群身份」页真实返回）；**生图**（OpenAI 兼容 /v1/images/generations，`qq_draw_image` 发到白名单聊天，ownerOnly 默认开）；**空间日记**（qzone.js 原样搬入，每天定时写说说挂看门狗，`qq_send_qzone`/`delete_qzone`）；**rulesText 动态条目**（画图/B站/群管只在功能开启时告诉她）；面板 `/diary/history`、`/bili/state`、`/qzone/social/state` 真实化 |
 | Web 面板 | ✅ | **上游 1946 行 React 面板原封复用** + 桥内 DSH API 兼容层；DSH 体验 1:1 回归 |
+| **GUI 侧栏集成** | ✅ | 源码核实：GUI 侧栏 = tasks-index.sqlite，由「每工作区长驻 app-server 推 sessions-index 帧 → syncer 写索引」驱动，冷种子按 `directory` 精确匹配 + `task_type ∈ interactive/fork/workflow_parent` 过滤 session 表。桥的 CLI 会话天然合格（interactive + workspace 目录），**在 GUI 把 workspace 目录加为项目即可看到大肥鱼的会话、点开查看、直接插话**。桥每轮把干净短标题（`QQ · 主人私聊`/`QQ 群 · 群名`，title_source=custom 优先级最高）写回共享会话库；`askModel` 小任务改用 os.tmpdir() 免得刷屏 |
 | 翻唱（song） | ⬜ | 依赖 RVC 本地推理栈（人声分离 + 音色转换），重；需要时再评估（上游 `song/studio.js` ~600 行 + python 栈） |
 
 ## 已验证的关键事实（踩坑记录）

@@ -3,10 +3,10 @@
 // dsh 参数换成桥自己提供的轻对象——模型走「zcode -p 一次性小任务」，零额外凭据。
 
 import { spawn } from 'node:child_process'
-import { writeFileSync, rmSync } from 'node:fs'
+import { writeFileSync, rmSync, mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { detectCjs } from '../zcode.js'
-import { dataDir, ensureDir } from './store.js'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -54,7 +54,9 @@ export async function askModel(_dsh, o = (typeof _dsh === 'object' && _dsh && _d
   if (!cjs) throw new Error('找不到 zcode.cjs')
   const prompt = (o.system ? `[系统要求] ${o.system}\n\n` : '') + (o.text || '')
   const args = [cjs, '-p', prompt, '--json', '--surface', 'terminal', '--locale', 'zh-CN']
-  const cwd = ensureDir(dataDir('tmp', 'ask'))
+  // cwd 用系统临时目录：这些一次性小会话也会写进 GUI 的共享会话库（按 directory 冷种子进侧栏），
+  // 放 workspace 下会把「[系统要求]…」刷进主人的任务列表；放 os.tmpdir() 就永远不进侧栏。
+  const cwd = mkdtempSync(join(tmpdir(), 'aurabot-ask-'))
   args.push('--cwd', cwd)
   const files = []
   try {
@@ -76,6 +78,7 @@ export async function askModel(_dsh, o = (typeof _dsh === 'object' && _dsh && _d
       }
     }
   } finally {
+    rmSync(cwd, { recursive: true, force: true })
     for (const f of files) { try { rmSync(f, { force: true }) } catch (error) {} }
   }
 }
