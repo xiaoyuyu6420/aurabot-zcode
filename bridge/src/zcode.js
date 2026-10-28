@@ -26,7 +26,7 @@ export function detectCjs(explicit = '') {
   return ''
 }
 
-export function createZcodeDriver({ getConfig, log }) {
+export function createZcodeDriver({ getConfig, log, groupNames }) {
   const tableFile = () => dataDir('sessions.json')
   const table = () => readJson(tableFile(), () => ({ chats: {} }))
   const saveTable = (t) => writeJson(tableFile(), t)
@@ -71,7 +71,10 @@ export function createZcodeDriver({ getConfig, log }) {
   function guiTitleFor(chatId) {
     const cfg = getConfig()
     const [kind, id] = String(chatId || '').split(':')
-    if (kind === 'group') return `QQ 群 · ${id}`
+    if (kind === 'group') {
+      const name = typeof groupNames === 'function' ? groupNames()?.get?.(String(id)) : groupNames?.get?.(String(id))
+      return name ? `QQ 群 · ${name}` : `QQ 群 · ${id}`
+    }
     if (kind === 'private') return id === String(cfg.ownerQQ) ? `QQ · ${cfg.ownerName || '主人'}私聊` : `QQ 私聊 · ${id}`
     return null // system:/后台任务不进侧栏
   }

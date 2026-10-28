@@ -95,7 +95,7 @@ export async function createApp({ echo = false, watch = false } = {}) {
   }
 
   // ---------- zcode 驱动 ----------
-  const zcode = createZcodeDriver({ getConfig, log: logger.child('zcode') })
+  const zcode = createZcodeDriver({ getConfig, log: logger.child('zcode'), groupNames: () => hub?.groupNames })
 
   // ---------- QQ 网关 ----------
   const snowluma = createSnowLumaManager({
