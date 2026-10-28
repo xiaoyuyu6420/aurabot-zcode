@@ -7,6 +7,7 @@ import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { homedir } from 'node:os'
+import { DatabaseSync } from 'node:sqlite'
 import { dataDir, dataRoot, readJson, writeJson, ensureDir } from './core/store.js'
 
 const CANDIDATE_CJS = [
@@ -61,6 +62,32 @@ export function createZcodeDriver({ getConfig, log }) {
     if (kind === 'group') return true
     if (kind === 'private') return String(id) !== String(getConfig().ownerQQ)
     return true // system:、tmp/ask 等后台会话不给写权限（里面只跑小任务）
+  }
+
+  // ---------- GUI 侧栏集成 ----------
+  // CLI 会话写进共享库 cli/db/db.sqlite（GUI 冷种子按 directory + task_type 过滤）。
+  // 这里把群聊/私聊的会话标题改成干净的短标题（上游 titleFor 同款），侧栏里就是清爽条目。
+  const titleCache = new Map() // chatId → 上次写过的标题（没变就不写）
+  function guiTitleFor(chatId) {
+    const cfg = getConfig()
+    const [kind, id] = String(chatId || '').split(':')
+    if (kind === 'group') return `QQ 群 · ${id}`
+    if (kind === 'private') return id === String(cfg.ownerQQ) ? `QQ · ${cfg.ownerName || '主人'}私聊` : `QQ 私聊 · ${id}`
+    return null // system:/后台任务不进侧栏
+  }
+  function updateSessionTitle(chatId, sessionId) {
+    const title = guiTitleFor(chatId)
+    if (!title || !sessionId || titleCache.get(chatId) === title) return
+    try {
+      const dbPath = process.env.ZCODE_SESSION_DB || join(process.env.USERPROFILE || homedir(), '.zcode', 'cli', 'db', 'db.sqlite')
+      const db = new DatabaseSync(dbPath)
+      db.prepare('update session set title = ?, title_source = ? where id = ?').run(title, 'custom', sessionId)
+      db.close()
+      titleCache.set(chatId, title)
+      log.debug(`${chatId}：GUI 侧栏标题已设为「${title}」`)
+    } catch (error) {
+      log.debug('GUI 标题写入失败（不影响聊天）：', error.message)
+    }
   }
 
   const cjsPath = () => {
@@ -135,6 +162,7 @@ export function createZcodeDriver({ getConfig, log }) {
         log.info(`${chatId}：聊了 ${turns} 轮，下一条消息换新会话`)
       }
       saveTable(t)
+      updateSessionTitle(chatId, r.sessionId) // GUI 侧栏标题（task-index 冷种子用）
       log.debug(`${chatId}：一轮 ${((Date.now() - t0) / 1000).toFixed(1)}s，${r.usage?.totalTokens ?? '?'} tokens`)
       return { text: r.response, sessionId: r.sessionId, usage: r.usage, turns }
     } finally {
