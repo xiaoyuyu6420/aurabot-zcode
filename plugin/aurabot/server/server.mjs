@@ -51,7 +51,7 @@ async function bridgeAlive() {
 }
 
 // 密钥类字段不进模型/面板
-const SECRET_PATHS = [['snowluma', 'webuiPassword'], ['snowluma', 'httpToken'], ['snowluma', 'wsToken']]
+const SECRET_PATHS = [['snowluma', 'webuiPassword'], ['snowluma', 'httpToken'], ['snowluma', 'wsToken'], ['imageGen', 'apiKey']]
 function stripSecrets(cfg) {
   const c = structuredClone(cfg)
   for (const [g, k] of SECRET_PATHS) if (c?.[g]) c[g][k] = c[g][k] ? '(已设置)' : ''
@@ -234,6 +234,12 @@ async function qqEditSticker({ sticker, newName, tags, del }) {
   return `改好了：「${label}」→「${r.item.name}」${r.item.tags?.length ? '（' + r.item.tags.join('/') + '）' : ''}`
 }
 
+/** 开放口动作的一层薄封装：把工具参数映射到 openCall。 */
+async function openAction(action, params) {
+  const j = await openCall(action, params)
+  return j.message || JSON.stringify(j)
+}
+
 // ---------------- MCP 协议 ----------------
 
 const TOOLS = [
@@ -307,6 +313,69 @@ const TOOLS = [
       required: ['sticker'],
     },
   },
+  {
+    name: 'qq_send_message',
+    description: '主动给某个 QQ 好友或群发一条消息（不是回复当前聊天时用）。target 写 private:QQ号 或 group:群号；只能发给白名单里的人和群。text 里可以用 ||| 分多条、<voice>…</voice> 发语音、<sticker:名字> 发表情。',
+    inputSchema: {
+      type: 'object',
+      properties: { target: { type: 'string', description: 'private:QQ号 或 group:群号' }, text: { type: 'string', description: '要发的话' } },
+      required: ['target', 'text'],
+    },
+  },
+  {
+    name: 'qq_group_admin',
+    description: '群管理：禁言 / 解禁 / 踢人 / 改头衔 / 发公告。只有主人要求时才能用；别人要求会被系统拒绝。改头衔要群主身份。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['ban', 'unban', 'kick', 'title', 'notice'], description: 'ban 禁言，unban 解禁，kick 踢出，title 改专属头衔，notice 发公告' },
+        groupId: { type: 'string', description: '群号（群里用时可由主人说明）' },
+        userId: { type: 'string', description: '对象 QQ 号（notice 不需要）' },
+        minutes: { type: 'number', description: '禁言分钟数，默认 10' },
+        text: { type: 'string', description: '头衔内容或公告内容' },
+      },
+      required: ['action'],
+    },
+  },
+  {
+    name: 'qq_draw_image',
+    description: '画一张图发到聊天里（需要在面板里开启生图并填好服务地址）。prompt 写要画什么。',
+    inputSchema: {
+      type: 'object',
+      properties: { chatId: { type: 'string', description: 'private:QQ号 或 group:群号' }, prompt: { type: 'string', description: '要画的内容' } },
+      required: ['chatId', 'prompt'],
+    },
+  },
+  {
+    name: 'qq_send_qzone',
+    description: '在你自己的 QQ 空间发一条说说。content 是正文（第一人称，口语）。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        content: { type: 'string', description: '说说正文' },
+        visibility: { type: 'string', enum: ['all', 'friends', 'self'], description: '谁能看：all 所有人，friends 好友，self 仅自己' },
+      },
+      required: ['content'],
+    },
+  },
+  {
+    name: 'bili_watch',
+    description: '打开一个 B 站视频看看：读标题、简介、字幕和热评，看完再跟大家聊。别人发来 B 站链接、BV 号或分享卡片时用。',
+    inputSchema: {
+      type: 'object',
+      properties: { link: { type: 'string', description: 'B 站链接、b23.tv 短链或 BV 号' } },
+      required: ['link'],
+    },
+  },
+  {
+    name: 'bili_comment',
+    description: '在一个 B 站视频下发评论（只有主人让你发的时候才用；需要面板里配好 B 站 Cookie）。',
+    inputSchema: {
+      type: 'object',
+      properties: { link: { type: 'string', description: 'B 站链接或 BV 号' }, text: { type: 'string', description: '评论内容' } },
+      required: ['link', 'text'],
+    },
+  },
 ]
 
 const PANEL_URI = 'ui://aurabot/panel.html'
@@ -341,6 +410,20 @@ async function callTool(name, args) {
     }
     case 'qq_edit_sticker':
       return { content: [{ type: 'text', text: await qqEditSticker(a) }] }
+    case 'qq_send_message':
+      return { content: [{ type: 'text', text: await openAction('send_message', { target: a.target, text: a.text }) }] }
+    case 'qq_group_admin':
+      return { content: [{ type: 'text', text: await openAction('group_admin', { action: a.action, groupId: a.groupId, userId: a.userId, minutes: a.minutes, text: a.text }) }] }
+    case 'qq_draw_image':
+      return { content: [{ type: 'text', text: await openAction('draw_image', { chatId: a.chatId, prompt: a.prompt }) }] }
+    case 'qq_send_qzone':
+      return { content: [{ type: 'text', text: await openAction('send_qzone', { content: a.content, visibility: a.visibility }) }] }
+    case 'bili_watch': {
+      const r = await openCall('bili_watch', { link: a.link })
+      return { content: [{ type: 'text', text: r.message || '看完了' }] }
+    }
+    case 'bili_comment':
+      return { content: [{ type: 'text', text: await openAction('bili_comment', { link: a.link, text: a.text }) }] }
     default:
       throw new Error(`未知工具：${name}`)
   }

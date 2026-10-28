@@ -2,7 +2,7 @@
 
 > 持续更新的进度账本。架构与设计决策见 [spec.md](./spec.md)，使用方法见 [README](./README.md)。
 
-## 当前状态（2026-10-27）：M5 完成（M0-M5 全部落地），生产运行中
+## 当前状态（2026-10-28）：上游功能全部搬完（除翻唱），生产运行中
 
 机器人以「大肥鱼」人格在 QQ 常驻（生产模式：真收真发），Web 面板为上游原版复刻。
 
@@ -17,11 +17,13 @@ QQ ⇄ SnowLuma(OneBot v11, C:\Aurabot\snowluma) ⇄ 桥进程 daemon ⇄ zcode 
 | M0 源码研读 + spec | ✅ | 上游架构/依赖面全解；**ZCode 开源核实**（§0.5：CLI `-p --json --resume`、原生 bots 的局限、自动化 20 条上限） |
 | M1 桥进程 + CLI 驱动 | ✅ | 上游零依赖层原样搬入；hub 会话驱动段重写（每 QQ 聊天一个 `--resume` 持久会话）；`aurabot.js` CLI 全套；Windows 原生部署 |
 | M1.5 WSL 部署（已弃） | ✅→弃 | WSL 方案完整跑通后，为性能与简洁迁回 Windows 原生（SnowLuma Docker → Windows 版；教训与排查记录保留在 git 历史） |
-| M2 插件/MCP 工具 | ✅ | `.zcode-plugin` 插件（MCP server + 会话内 UI 面板）；**对话内 QQ 工具**：`qq_chat_history`、`qq_send_sticker`、`qq_list_stickers`、`qq_edit_sticker`（走桥开放口，daemon 没跑时优雅报错）；社交档 spawn 自动加 `--disallowed-tools Write,Edit,Bash` |
+| M2 插件/MCP 工具 | ✅ | `.zcode-plugin` 插件（MCP server + 会话内 UI 面板）；**对话内 14 个工具**：翻记录 / 表情四件套 / 主动发消息 / 群管 / 画图 / 发说说 / B 站看+评；社交档 spawn 自动加 `--disallowed-tools Write,Edit,Bash` |
 | M3 记忆/心情/表情包 | ✅ | 三模块上游原样搬入；桥内 `core/llm.js` 实现 `askModel` 契约（`zcode -p` 小任务，零额外凭据）；心情按轮注入 + 记忆召回 + 表情自动推荐；面板对应页真实化 |
 | M4 语音/主动搭话/群聊 | ✅ | **edge-tts 语音条**（私有 pyenv，Windows 语音兜底；`<voice>` 拆条生效 + 短回复按概率自动变语音 ×心情系数）；**主动搭话**（speakup tick 挂看门狗，`hub.pushToSession` 后台管线，追问 nudge；`aurabot.js speakup fire` 手动触发）；面板 `/voice/test`、`/voice/install`、`/speakup/fire` 真实化 |
-| **M5 B 站/空间/开放接口** | ✅ | **B 站**（`bili/api.js`+`duty.js` 原样搬入：搜/看/字幕/热评/评论/回复；定时刷挂看门狗 tick；后台思考走 `zcode.runOnceIn` 临时会话；`bili_watch` 经开放口可用）；**QQ 空间互动**（`qzone-social.js` 原样搬入：回自己说说评论 + 逛好友动态点赞评论）；**开放 HTTP 接口**（`POST /api/open`：`chat_history`/`send_sticker`/`send_message`/`bili_watch`/`status`，token 鉴权 + 白名单拦截） |
-| Web 面板 | ✅ | **上游 1946 行 React 面板原封复用** + 桥内 DSH API 兼容层（60+ 接口）；DSH 体验 1:1 回归 |
+| M5 B 站/空间/开放接口 | ✅ | **B 站**（搜/看/字幕/热评/评论/回复；定时刷挂看门狗）；**QQ 空间互动**（回评论 + 逛好友动态）；**开放 HTTP 接口**（token 鉴权 + 白名单） |
+| **M6 收尾（全部功能）** | ✅ | **群管**（禁言/解禁/踢人/头衔/公告：turnHasOwner + 白名单 + 群身份三层校验；面板「群身份」页真实返回）；**生图**（OpenAI 兼容 /v1/images/generations，`qq_draw_image` 发到白名单聊天，ownerOnly 默认开）；**空间日记**（qzone.js 原样搬入，每天定时写说说挂看门狗，`qq_send_qzone`/`delete_qzone`）；**rulesText 动态条目**（画图/B站/群管只在功能开启时告诉她）；面板 `/diary/history`、`/bili/state`、`/qzone/social/state` 真实化 |
+| Web 面板 | ✅ | **上游 1946 行 React 面板原封复用** + 桥内 DSH API 兼容层；DSH 体验 1:1 回归 |
+| 翻唱（song） | ⬜ | 依赖 RVC 本地推理栈（人声分离 + 音色转换），重；需要时再评估（上游 `song/studio.js` ~600 行 + python 栈） |
 
 ## 已验证的关键事实（踩坑记录）
 
@@ -39,9 +41,9 @@ QQ ⇄ SnowLuma(OneBot v11, C:\Aurabot\snowluma) ⇄ 桥进程 daemon ⇄ zcode 
 
 ## 下一步（按价值排序）
 
-1. **B 站/空间实测**：面板里填 B 站 Cookie、开 `bili.enabled`，跑一轮 `run({force:true})` 看评论质量；空间功能依赖 SnowLuma 的 qzone 扩展 API，先确认网关支持
-2. **长测**：生产环境跑几天，观察主动搭话频率、群聊插话质量、自动语音触发率，按体感调参
-3. 面板 B 站/空间页真实化（`/bili/state`、`/qzone/social/state` 目前还是未移植空壳）
+1. **配置**：面板里按需开启——生图（填硅基流动等 OpenAI 兼容服务）、B 站 Cookie、空间日记/互动开关；不开的她不会答应做不了的事
+2. **长测调参**：主动搭话频率、群聊插话质量、自动语音触发率
+3. **翻唱**（song）：需要 RVC 本地推理栈，量大，值得再做则单独立项
 
 ## 部署速查（Windows）
 

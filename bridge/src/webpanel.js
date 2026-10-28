@@ -59,7 +59,7 @@ function gatewayStateFromLog(workspaceDir) {
   return 'unknown'
 }
 
-const SECRET_PATHS = [['snowluma', 'webuiPassword'], ['snowluma', 'httpToken'], ['snowluma', 'wsToken']]
+const SECRET_PATHS = [['snowluma', 'webuiPassword'], ['snowluma', 'httpToken'], ['snowluma', 'wsToken'], ['imageGen', 'apiKey']]
 function stripSecrets(cfg) {
   const c = structuredClone(cfg)
   for (const [g, k] of SECRET_PATHS) if (c?.[g]) c[g][k] = c[g][k] ? '(已设置)' : ''
@@ -95,7 +95,7 @@ function pickWritable(patch) {
 
 // ---------- DSH 原版面板的 API 兼容层 ----------
 
-const SECRET_PATHS_DSH = [['snowluma', 'webuiPassword'], ['snowluma', 'httpToken'], ['snowluma', 'wsToken']]
+const SECRET_PATHS_DSH = [['snowluma', 'webuiPassword'], ['snowluma', 'httpToken'], ['snowluma', 'wsToken'], ['imageGen', 'apiKey']]
 
 function publicConfigDSH(cfg) {
   const c = structuredClone(cfg)
@@ -292,13 +292,36 @@ function makeDshApi(getApp) {
     if (sub === '/model/ping') return json(200, { ok: true, message: '模型由 ZCode CLI 管理，无需测试' })
     if (sub === '/changelog') return json(200, { ok: true, version: VERSION, notes: '适配版以本仓库为准；上游更新请看 dsh-aurabot-qq 的 Releases。' })
     if (sub === '/update/check') return json(200, { ok: true, update: false, message: '适配版以本仓库为准' })
-    if (sub === '/groups/roles') return json(200, { ok: true, roles: {} })
+    if (sub === '/groups/roles') {
+      const ga = appRef().groupAdmin
+      if (!ga) return json(200, { ok: true, roles: {} })
+      try { return json(200, { ok: true, list: await ga.rolesList() }) } catch (error) { return json(200, { ok: false, message: error.message }) }
+    }
+    if (sub === '/diary/history') {
+      const dz = appRef().diaryModule
+      return json(200, { ok: true, items: dz?.history?.() || [], next: dz?.nextTime?.() || '' })
+    }
+    if (sub === '/diary/run') {
+      const dz = appRef().diaryModule
+      if (!dz) return json(200, { ok: false, message: '空间日记模块没加载' })
+      return json(200, await dz.writeDiary({ visibility: body.visibility }))
+    }
+    if (sub === '/bili/state') {
+      const bili = appRef().biliModule
+      if (!bili) return json(200, { ok: true, enabled: false })
+      let account = { isLogin: false, uname: '' }
+      try { account = await bili.account() } catch (error) {}
+      return json(200, { ok: true, ...bili.state(), account })
+    }
+    if (sub === '/qzone/social/state') {
+      const qs = appRef().qzoneSocialModule
+      return json(200, { ok: true, enabled: Boolean(qs), state: qs?.state?.() || null })
+    }
     if (sub === '/insights') {
       const mem = appRef().memoryModule
       const items = mem?.insights ? mem.insights().map((x) => ({ ...x, text: redact(x.text) })) : []
       return json(200, { ok: true, items, styles: mem?.styles?.() || {} })
     }
-    if (sub === '/diary/history') return json(200, { ok: true, items: [], next: 0 })
     if (sub === '/local/status') return json(200, { ok: true, dir: join(ws(), 'local'), list: [] })
     if (sub === '/modules') return json(200, { ok: true, dir: join(ws(), 'modules'), safeMode: false, apiVersion: 1, list: [], prompt: '' })
     if (sub === '/stickers') {

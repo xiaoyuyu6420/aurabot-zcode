@@ -96,6 +96,26 @@ export const DEFAULTS = {
     maxPerDay: 8,
     intervalMin: 30,
   },
+  imageGen: {
+    enabled: false,
+    provider: 'openai', // openai = 兼容 OpenAI /v1/images/generations 的服务（硅基流动、通义、本地 ComfyUI 代理……）
+    baseUrl: '',
+    apiKey: '',
+    model: '',
+    size: '1024x1024',
+    stylePrompt: '', // 每次生图自动加在前面的风格描述
+    ownerOnly: true, // 只有主人能让她画
+  },
+  diary: {
+    enabled: false, // 每天自动写空间说说
+    timesPerDay: 2,
+    windowStart: '10:00',
+    windowEnd: '23:30',
+    minGapMinutes: 180,
+    minChars: 60,
+    maxChars: 140,
+    visibility: 'all', // all | self（仅自己可见）
+  },
   persona: { current: 'dafeiyu' },
   group: { ...DEFAULT_GROUP_POLICY, overrides: {} },
 }
@@ -212,6 +232,25 @@ export function normalize(raw) {
   q.ownerChance = num(q.ownerChance, 0.7, 0, 1)
   q.maxPerDay = num(q.maxPerDay, 8, 0, 50)
   q.intervalMin = num(q.intervalMin, 30, 5, 1440)
+  // M6 收尾：imageGen / diary
+  const ig = c.imageGen
+  ig.enabled = bool(ig.enabled, false)
+  ig.provider = String(ig.provider || 'openai').trim()
+  ig.baseUrl = String(ig.baseUrl || '').trim()
+  ig.apiKey = String(ig.apiKey || '').trim()
+  ig.model = String(ig.model || '').trim()
+  ig.stylePrompt = String(ig.stylePrompt || '').trim()
+  ig.ownerOnly = bool(ig.ownerOnly, true)
+  if (!/^\d{3,4}x\d{3,4}$/.test(String(ig.size))) ig.size = '1024x1024'
+  const d = c.diary
+  d.enabled = bool(d.enabled, false)
+  d.timesPerDay = num(d.timesPerDay, 2, 0, 6)
+  if (!/^\d{1,2}:\d{2}$/.test(String(d.windowStart || ''))) d.windowStart = '10:00'
+  if (!/^\d{1,2}:\d{2}$/.test(String(d.windowEnd || ''))) d.windowEnd = '23:30'
+  d.minGapMinutes = num(d.minGapMinutes, 180, 0, 1440)
+  d.minChars = num(d.minChars, 60, 10, 500)
+  d.maxChars = num(d.maxChars, 140, 20, 1000)
+  d.visibility = d.visibility === 'self' ? 'self' : 'all'
   const z = c.zcode
   z.cjsPath = String(z.cjsPath || '').trim()
   z.nodePath = String(z.nodePath || '').trim()
@@ -230,6 +269,7 @@ export const SECRET_FIELDS = [
   ['snowluma', 'webuiPassword'],
   ['snowluma', 'httpToken'],
   ['snowluma', 'wsToken'],
+  ['imageGen', 'apiKey'],
 ]
 
 const FILE = () => CONFIG_FILE()

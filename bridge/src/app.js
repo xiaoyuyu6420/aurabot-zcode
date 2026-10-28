@@ -228,6 +228,9 @@ export async function createApp({ echo = false, watch = false } = {}) {
   let speakupModuleRef = null
   let biliModuleRef = null
   let qzoneSocialModuleRef = null
+  let diaryModuleRef = null
+  let groupAdminRef = null
+  let imageGenRef = null
   {
     const slog = logger.child('stickers')
     const { createStickerStore } = await import('./features/stickers.js')
@@ -276,6 +279,23 @@ export async function createApp({ echo = false, watch = false } = {}) {
     const { createQzoneSocial } = await import('./features/qzone-social.js')
     qzoneSocialModuleRef = createQzoneSocial({ getConfig, onebot, hub: { ...hub, runSystemTurn: biliThinkAdapter(zcode) }, log: logger.child('qzone'), memory: memoryModuleRef })
     log.info('空间互动模块已加载')
+  }
+  {
+    // M6 收尾：群管（禁言/踢人/头衔/公告，主人开口才做）+ 生图
+    const { createGroupAdmin } = await import('./features/group-admin.js')
+    groupAdminRef = createGroupAdmin({ getConfig, onebot, hub, log: logger.child('group-admin') })
+    const { createImageGen } = await import('./features/imagegen.js')
+    imageGenRef = createImageGen({ getConfig, log: logger.child('imagegen') })
+    log.info('群管与生图模块已加载')
+  }
+  {
+    // M6 收尾：空间日记（每天自动写说说；qzone.js 原样搬入，runSystemTurn 走 zcode 临时会话）
+    const { createQzone } = await import('./features/qzone.js')
+    diaryModuleRef = createQzone({
+      getConfig, onebot, hub: { ...hub, runSystemTurn: biliThinkAdapter(zcode) }, log: logger.child('diary'),
+      onDiary: (text) => { try { app.memoryModule?.add?.({ text: `我在 QQ 空间写过：${text}`, importance: 0.55, tags: ['空间日记'], source: 'diary' }) } catch (error) {} },
+    })
+    log.info('空间日记模块已加载')
   }
 
   // ---------- 启动 / 看门狗 ----------
@@ -326,6 +346,12 @@ export async function createApp({ echo = false, watch = false } = {}) {
         log.debug('逛空间出错：', error.message)
       }
     }
+    // M6 收尾：空间日记的定时写作（内部按 planDiaryTimes 自己排时）
+    if (app.diaryModule?.tick) {
+      try { await app.diaryModule.tick() } catch (error) {
+        log.debug('空间日记出错：', error.message)
+      }
+    }
   }
   const safe = (fn, label) => () => { Promise.resolve().then(fn).catch((error) => log.warn(`${label}出错：`, error.message)) }
   const watchdogNow = safe(watchdog, '看门狗')
@@ -356,8 +382,8 @@ export async function createApp({ echo = false, watch = false } = {}) {
 
   const app = {
     logger, log, getConfig, setConfig,
-    // M3/M4/M5 模块实例（面板与 webpanel 用）
-    stickersModule: null, moodModule: null, memoryModule: null, speakupModule: null, biliModule: null, qzoneSocialModule: null,
+    // M3/M4/M5/M6 模块实例（面板与 webpanel 用）
+    stickersModule: null, moodModule: null, memoryModule: null, speakupModule: null, biliModule: null, qzoneSocialModule: null, diaryModule: null, groupAdmin: null, imageGen: null,
     /** 只改内存里的配置（不落盘）：sim 这类本地测试用它临时放行，不碰真实的总开关。 */
     patchConfigLive(patch) {
       cfg = { ...cfg, ...patch(cfg) }
@@ -390,6 +416,9 @@ export async function createApp({ echo = false, watch = false } = {}) {
   app.speakupModule = speakupModuleRef
   app.biliModule = biliModuleRef
   app.qzoneSocialModule = qzoneSocialModuleRef
+  app.diaryModule = diaryModuleRef
+  app.groupAdmin = groupAdminRef
+  app.imageGen = imageGenRef
   exports_app = app
   return app
 }
